@@ -1,4 +1,5 @@
 from tkinter import filedialog
+from tkinter import messagebox
 import tkinter as tk
 import os.path
 
@@ -123,6 +124,8 @@ class GUI:
 		self.editor = editor
 		
 		self.master = master
+		self.master.protocol("WM_DELETE_WINDOW", self.on_closing)
+		
 		master.title("MicroBrute Sequence Editor - New File")
 		master.minsize(500,400)
 		
@@ -140,12 +143,8 @@ class GUI:
 			self.list.insert(tk.END, "Sequence "+str(a))
 		self.list.selection_set(0)
 		
-		self.save_button = tk.Button(master, text="Save", command=self.save_file)
-		#self.save_button.bind("<Button-1>", self.save_file)
-		
+		self.save_button = tk.Button(master, text="Save", command=self.save_file)		
 		self.load_button = tk.Button(master, text="Load", command=self.load_file)
-		#self.load_button.bind("<Button-1>", self.load_file)
-		
 		
 		
 		self.master.columnconfigure(1, weight=3)
@@ -172,11 +171,17 @@ class GUI:
 		self.editor.save_file(filename)
 		
 	def load_file(self):
+		if self.editor.save_pending:
+			if not messagebox.askokcancel("Discard Changes", "Do you want to load without saving changes?"):
+				return
+		
 		filename = filedialog.askopenfilename(defaultextension=".mbseq", filetypes=[("MicroBrute sequences",".mbseq")])
-		self.master.title("MicroBrute Sequence Editor - "+ os.path.split(filename)[1])
-		self.editor.load_file(filename)
-		self.piano_roll.jump_scroll(self.editor.get_first_note())
-		self.sequence_to_display()
+		
+		if os.path.isfile(filename):
+			self.master.title("MicroBrute Sequence Editor - "+ os.path.split(filename)[1])
+			self.editor.load_file(filename)
+			self.piano_roll.jump_scroll(self.editor.get_first_note())
+			self.sequence_to_display()
 
 	def list_callback(self, event):
 		self.editor.selected_sequence = event.widget.curselection()[0]
@@ -188,11 +193,18 @@ class GUI:
 		for step, note in enumerate(self.editor.sequences[self.editor.selected_sequence]):
 			self.piano_roll.set_note(step, note)
 		self.piano_roll.update(len(self.editor.sequences[self.editor.selected_sequence]))
+	
+	def on_closing(self):
+		if self.editor.save_pending:
+			if messagebox.askokcancel("Quit", "Do you want to quit without saving?"):
+				self.master.destroy()
+		else: self.master.destroy()
 
 class Editor:
 	def __init__(self):
 		self.sequences = [[] for _ in range(8)]
 		self.selected_sequence = 0
+		self.save_pending = False
 	
 	def change_sequence(self, step, note):
 		#sanity check
@@ -211,6 +223,7 @@ class Editor:
 			current[step] = 'x'
 		else:
 			current[step] = note #overwrite existing note
+		self.save_pending = True
 
 	def shorten_sequence(self, step):
 		#sanity check
@@ -218,15 +231,20 @@ class Editor:
 			raise ValueError('Step of illegal value: '+str(step))
 		
 		self.sequences[self.selected_sequence] = self.sequences[self.selected_sequence][0:step]
+		
+		self.save_pending = True
 	
 	def save_file(self, filename):
 		with open(filename,'w') as f:
 			for num, seq in enumerate(self.sequences, 1):
 				f.write(str(num) + ':')
 				
-				for entry in seq[0:-1]:
-					f.write(str(entry) + ' ')
-				f.write(str(seq[-1]) + '\r\n')
+				if seq:
+					for entry in seq[0:-1]:
+						f.write(str(entry) + ' ')
+					f.write(str(seq[-1]) + '\r\n')
+		
+		self.save_pending = False
 	
 	def load_file(self, filename):
 		self.sequences = []
@@ -244,6 +262,8 @@ class Editor:
 					except(ValueError):
 						temp_list.append('x')
 				self.sequences.append(temp_list)
+				
+		self.save_pending = False
 	
 	def get_first_note(self):
 		for note in self.sequences[self.selected_sequence]:
