@@ -1,3 +1,10 @@
+#dist directory of py2exe
+/dist
+
+/__pycache__
+*.mid
+setup.py
+
 # Windows image file caches
 Thumbs.db
 ehthumbs.db
