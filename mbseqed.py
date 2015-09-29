@@ -1,9 +1,16 @@
 from tkinter import filedialog
 from tkinter import messagebox
 import tkinter as tk
-import os.path
+
+import os.path #for saving and loading files, checking file paths
+import pygame.mixer #for playing back the sequence
+import io #for binary buffer to play midi from
+import MidiFile3 #to create midi binary
+
 
 class PianoRoll(tk.Canvas):
+	'''Piano Roll widget'''
+	
 	def __init__(self, master):
 		#layout constants
 		self.key_width = 16
@@ -38,6 +45,8 @@ class PianoRoll(tk.Canvas):
 		self._draw_stipple()
 	
 	def _draw_piano(self):
+		'''draw the piano bars on the left'''
+		
 		count = 7 #highest possible note is f
 		octave = 8
 		for a in range(0,self.height, self.key_width):
@@ -57,6 +66,7 @@ class PianoRoll(tk.Canvas):
 			count += 1
 		
 	def _draw_lines(self):
+		'''draw the grid in whcih the notes are placed'''
 		self.delete("line")
 	
 		count = 0
@@ -72,11 +82,15 @@ class PianoRoll(tk.Canvas):
 			self.create_line(self.key_length, a, self.width, a, tag="line")
 			
 	def _draw_stipple(self, sequence_length=0):
+		'''draw the greyed-out area which indicates that the sequence is shorter than 64 steps'''
+		
 		self.delete("stipple")
 		left = self.key_length + self.step_length*sequence_length
 		self.create_rectangle(left,0,self.width, self.height, stipple="gray50", fill="black", width=0, tag="stipple")
 		
 	def scroll(self, event):
+		'''process mousewheel events to scroll'''
+		
 		#Windows will send <MouseWheel> event, Linux will send <Button-4> and <Button-5> events
 		if event.delta:
 			self.yview_scroll(-event.delta//40,"units")
@@ -86,15 +100,21 @@ class PianoRoll(tk.Canvas):
 			self.yview_scroll(3,"units")
 	
 	def jump_scroll(self, first_note):
+		'''jump the view,so that the first note of the sequence can be seen'''
+	
 		if first_note is not None:
 			self.yview_moveto(1-(first_note+(self.winfo_height()/self.key_width)/2)/self.note_range)
 	
 	def update(self, stipple=None):
+		'''draw the lines and the stipple after notes have changed'''
+		
 		self._draw_lines()
 		if stipple is not None:
 			self._draw_stipple(stipple)
 	
 	def set_note(self, step, value):
+		'''put a note/break into the piano roll'''
+		
 		if step < 0 or step > 63:
 			print("Invalid step: ", step)
 	
@@ -113,15 +133,19 @@ class PianoRoll(tk.Canvas):
 			self.create_rectangle(topx, topy, lowx, lowy, fill="limegreen", tag="step")
 	
 	def get_clicked_note(self, event):
+		'''converts between window coordinates and the respective note'''
+	
 		x = self.canvasx(event.x)
 		y = self.canvasy(event.y)
 		step = int((x-self.key_length)//self.step_length)
 		note = self.note_range-int(y//self.key_width)
 		return (step, note)
 
+		
 class GUI:
-	def __init__(self, master, editor):
-		self.editor = editor
+	"""The whole GUI for the Application. Contains the Piano Roll and everything."""
+	def __init__(self, master, bank):
+		self.bank = bank
 		
 		self.master = master
 		self.master.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -143,8 +167,9 @@ class GUI:
 			self.list.insert(tk.END, "Sequence "+str(a))
 		self.list.selection_set(0)
 		
-		self.save_button = tk.Button(master, text="Save", command=self.save_file)		
-		self.load_button = tk.Button(master, text="Load", command=self.load_file)
+		self.play_button = tk.Button(master, text="Play", width=4, command=bank.play_sequence)
+		self.save_button = tk.Button(master, text="Save", width=4,command=self.save_bank)		
+		self.load_button = tk.Button(master, text="Load", width=4,command=self.load_bank)
 		
 		
 		self.master.columnconfigure(1, weight=3)
@@ -153,25 +178,26 @@ class GUI:
 		self.list.grid(row=0, column=0, rowspan=2, padx=5, pady=5)
 		self.save_button.grid(row=3, column=0, pady=5)
 		self.load_button.grid(row=4, column=0, pady=5)
+		self.play_button.grid(row=5, pady=5, padx=(5,5), sticky=tk.N)
 		
 		
 	def process_lmb(self, event): #add note to the sequence
 		step, note = self.piano_roll.get_clicked_note(event)
-		self.editor.change_sequence(step, note)
+		self.bank.change_sequence(step, note)
 		self.sequence_to_display()
 	
 	def process_rmb(self, event):#setting the sequence length
 		step = self.piano_roll.get_clicked_note(event)[0]
-		self.editor.shorten_sequence(step)
+		self.bank.shorten_sequence(step)
 		self.sequence_to_display()
 	
-	def save_file(self):
+	def save_bank(self):
 		filename = filedialog.asksaveasfilename(defaultextension=".mbseq", filetypes=[("MicroBrute sequences",".mbseq")])
 		self.master.title("MicroBrute Sequence Editor - "+ os.path.split(filename)[1])
-		self.editor.save_file(filename)
+		self.bank.save_bank(filename)
 		
-	def load_file(self):
-		if self.editor.save_pending:
+	def load_bank(self):
+		if self.bank.save_pending:
 			if not messagebox.askokcancel("Discard Changes", "Do you want to load without saving changes?"):
 				return
 		
@@ -179,28 +205,54 @@ class GUI:
 		
 		if os.path.isfile(filename):
 			self.master.title("MicroBrute Sequence Editor - "+ os.path.split(filename)[1])
-			self.editor.load_file(filename)
-			self.piano_roll.jump_scroll(self.editor.get_first_note())
+			self.bank.load_bank(filename)
+			self.piano_roll.jump_scroll(self.bank.get_first_note())
 			self.sequence_to_display()
 
 	def list_callback(self, event):
-		self.editor.selected_sequence = event.widget.curselection()[0]
-		self.piano_roll.jump_scroll(self.editor.get_first_note())
+		self.bank.selected_sequence = event.widget.curselection()[0]
+		self.piano_roll.jump_scroll(self.bank.get_first_note())
 		self.sequence_to_display()
 		
 	def sequence_to_display(self):
 		self.piano_roll.delete("step")
-		for step, note in enumerate(self.editor.sequences[self.editor.selected_sequence]):
+		for step, note in enumerate(self.bank.sequences[self.bank.selected_sequence]):
 			self.piano_roll.set_note(step, note)
-		self.piano_roll.update(len(self.editor.sequences[self.editor.selected_sequence]))
+		self.piano_roll.update(len(self.bank.sequences[self.bank.selected_sequence]))
 	
 	def on_closing(self):
-		if self.editor.save_pending:
+		if self.bank.save_pending:
 			if messagebox.askokcancel("Quit", "Do you want to quit without saving?"):
 				self.master.destroy()
 		else: self.master.destroy()
+		
+	def play(self):
+		self.bank.play_sequence()
+		
+		
+class Manager:
+	#manages single sequences & banks in one big file
+	
+	def __init__(self, filename='editor_data.dat'):
+		if not os.path.isfile(filename):
+			open(filename, 'w').close() #just create the file for later usage
+		self.file = filename
+		
+		
+class SingleSequence:
+	#individual sequence for storing in the database
+	def __init__(self, list=[], name="", desc="", tag=""):
+		self.list = list
+		self.name = name
+		self.description = desc
+		self.tags = []
+		if tag:
+			self.tags.append(tag)
 
-class Editor:
+		
+class Bank:
+	#Bank for making and loading mbseq files
+	
 	def __init__(self):
 		self.sequences = [[] for _ in range(8)]
 		self.selected_sequence = 0
@@ -234,7 +286,7 @@ class Editor:
 		
 		self.save_pending = True
 	
-	def save_file(self, filename):
+	def save_bank(self, filename):
 		with open(filename,'w') as f:
 			for num, seq in enumerate(self.sequences, 1):
 				f.write(str(num) + ':')
@@ -246,7 +298,7 @@ class Editor:
 		
 		self.save_pending = False
 	
-	def load_file(self, filename):
+	def load_bank(self, filename):
 		self.sequences = []
     
 		with open(filename, 'r') as f:
@@ -270,12 +322,34 @@ class Editor:
 			if note is not 'x':
 				return note
 		return None
+	
+	def make_midi(self, tempo=120):
+		midi = MidiFile3.MIDIFile(1)
+		
+		midi.addTempo(0,0,tempo)
+		
+		#add a note: midi.addNote(track,channel,pitch,time,duration,volume)
+		time_cursor=0.0
+		for note in self.sequences[self.selected_sequence]:
+			if note is not 'x':
+				midi.addNote(0,0,note,time_cursor,1,100)
+			time_cursor += 0.25
+		
+		return midi
+	
+	def play_sequence(self):
+		midifile = io.BytesIO()
+		self.make_midi().writeFile(midifile)
+		temp = io.BytesIO(midifile.getvalue())
+		pygame.mixer.music.load(temp)
+		pygame.mixer.music.play()
 		
 		
 def main():
+	pygame.mixer.init()
 	root = tk.Tk()
-	editor = Editor()
-	gui = GUI(root, editor)
+	bank = Bank()
+	gui = GUI(root, bank)
 	
 	root.mainloop()
 	
