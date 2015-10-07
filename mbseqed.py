@@ -1,6 +1,11 @@
-from tkinter import filedialog
-from tkinter import messagebox
-import tkinter as tk
+try: # for python 2.x
+    import tkMessageBox as messagebox
+    import tkFileDialog
+    import Tkinter as tk
+except ImportError: # for python 3
+    from tkinter import filedialog
+    from tkinter import messagebox
+    import tkinter as tk
 
 import os.path #for saving and loading files, checking file paths
 import pygame.mixer #for playing back the sequence
